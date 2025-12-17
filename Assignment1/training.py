@@ -164,9 +164,8 @@ class Decoder(nn.Module):
         self.output_proj.weight = self.embedding.weight
 
     def _causal_mask(self,L,device):
-        mask = torch.triu(torch.ones(L,L,device=device),diagonal=1)
-        mask = mask.masked_fill(mask==1,float('-inf'))
-        return mask.unsqueeze(0).unsqueeze(0)
+        mask = torch.triu(torch.full((L,L),float("-inf"),device=device),diagonal=1)
+        return mask[None,None,:,:]
 
     def forward(self,x,kv_cache=None,mask=None):
         B,L = x.shape
@@ -176,7 +175,9 @@ class Decoder(nn.Module):
             Lq = x.size(1)
             Lk = kv_cache[0]["k"].size(2) + Lq
             mask = torch.zeros(1, 1, Lq, Lk, device=x.device)
-        x = self.pe(self.embedding(x))
+
+        past_len = 0 if kv_cache is None else kv_cache[0]["k"].size(2)
+        x = self.pe(self.embedding(x), start_pos=past_len)
         new_caches = []
         for i, layer in enumerate(self.layers):
             x, new_cache = layer(x, kv_cache[i] if kv_cache is not None else None, mask)
@@ -195,9 +196,9 @@ class SinusoidalPositionalEncoding(nn.Module):
         pe[:,1::2] = torch.cos(pos * div_term)
         self.register_buffer('pe',pe)
 
-    def forward(self,x):
+    def forward(self,x,start_pos=0):
         B,L, _ = x.shape
-        return x + self.pe[:L].unsqueeze(0)
+        return x + self.pe[start_pos:start_pos+L].unsqueeze(0)
     
 def lm_loss(logits,labels):
     return F.cross_entropy(logits.view(-1,logits.size(-1)),labels.view(-1),ignore_index=SPECIAL["<pad>"])
@@ -238,9 +239,10 @@ def perplexity(loss):
 def generate(model, prompt_ids, max_new=50, temp=1.0, topk=20):
     model.eval()
     x = torch.tensor(prompt_ids, device=DEVICE).unsqueeze(0)
+    current_input = x
     cache = [None] * len(model.layers)
     for _ in range(max_new):
-        logits, cache = model(x, cache)
+        logits, cache = model(current_input, cache)
         logits = logits[:, -1, :] / temp
         probs = F.softmax(logits, dim=-1)
         if topk is not None:
@@ -249,6 +251,7 @@ def generate(model, prompt_ids, max_new=50, temp=1.0, topk=20):
             probs = probs2 / probs2.sum()
         nxt = torch.multinomial(probs, 1)
         x = torch.cat([x, nxt], dim=1)
+        current_input = nxt
         if nxt.item() == SPECIAL["<eos>"]:
             break
     return x.squeeze(0).tolist()
@@ -283,7 +286,7 @@ def main():
 
     tr_losses, va_losses = [], []
     tr_ppls, va_ppls = [], []
-    for ep in tqdm(range(10)):
+    for ep in tqdm(range(3)):
         tl = train_with_grad_accum(model, train_dl, opt, ACCUM, DEVICE)
         vl = evaluate(model, val_dl, DEVICE)
         tr_losses.append(tl)
