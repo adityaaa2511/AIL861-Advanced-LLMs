@@ -103,7 +103,7 @@ class MultiHeadAttention(nn.Module):
         x = x.transpose(1,2).contiguous().view(B,L,H*D_k)
         return x
     
-    def forward(self, x, mask=None):
+    def forward(self, x, kv_cache=None, mask=None):
         B,L,_ = x.shape
         qkv_proj = self.qkv(x)
 
@@ -112,11 +112,17 @@ class MultiHeadAttention(nn.Module):
         k = self._split_heads(k)
         v = self._split_heads(v)
 
+        if kv_cache is not None:
+            k = torch.cat([kv_cache[0],k],dim=2)
+            v = torch.cat([kv_cache[1],v],dim=2)
+
+        new_cache = {"k": k.detach(), "v": v.detach()}
+
         attn_out, attn = scaled_dot_product_attention(q,k,v,mask)
         attn_out = self._merge_heads(attn_out)
         out = self.o_proj(attn_out)
         out = self.dropout(out)
-        return out
+        return out , new_cache
     
 
 class FeedForward(nn.Module):
@@ -141,10 +147,11 @@ class TransformerBlock(nn.Module):
         self.ln1 = nn.LayerNorm(d_model)
         self.ln2 = nn.LayerNorm(d_model)
 
-    def forward(self,x,mask=None):
-        x = x + self.mha(self.ln1(x),mask)
+    def forward(self,x,kv_cache=None,mask=None):
+        a, new_cache = self.mha(self.ln1(x),kv_cache,mask)
+        x = x + a
         x = x + self.ffn(self.ln2(x))
-        return x
+        return x, new_cache
     
 class Decoder(nn.Module):
     def __init__(self,emb_init,vocab_size,d_model,d_ff,num_heads=8,num_layers=3,dropout=0.1):
@@ -160,16 +167,18 @@ class Decoder(nn.Module):
         mask = mask.masked_fill(mask==1,float('-inf'))
         return mask
 
-    def forward(self,x,mask=None):
+    def forward(self,x,kv_cache=None,mask=None):
         B,L = x.shape
         if mask is None:
             mask = self._casual_mask(L,DEVICE)
         x = self.pe(self.embedding(x))
-        for layer in self.layers:
-            x = layer(x,mask)
+        new_caches = []
+        for i, layer in enumerate(self.layers):
+            x, new_cache = layer(x, kv_cache[i] if kv_cache is not None else None, mask)
+            new_caches.append(new_cache)
         x = self.ln(x)
         logits = self.output_proj(x)
-        return logits
+        return logits, new_caches
     
 class SinusoidalPositionalEncoding(nn.Module):
     def __init__(self,d_model,max_len=5000):
@@ -194,7 +203,7 @@ def train_with_grad_accum(model,dataloader,optimizer,accum_steps,device):
     optimizer.zero_grad()
     for step, (input_ids, labels) in enumerate(dataloader):
         input_ids, labels = input_ids.to(device), labels.to(device)
-        logits = model(input_ids)
+        logits, _ = model(input_ids)
         loss = lm_loss(logits,labels)
         loss.backward()
         if (step + 1) % accum_steps == 0:
@@ -209,7 +218,7 @@ def evaluate(model,dataloader,device):
     total_loss = 0
     for input_ids, labels in dataloader:
         input_ids, labels = input_ids.to(device), labels.to(device)
-        logits = model(input_ids)
+        logits, _ = model(input_ids)
         loss = lm_loss(logits,labels)
         total_loss += loss.item() * input_ids.size(0)
     return total_loss / len(dataloader.dataset) 
@@ -244,7 +253,7 @@ def main():
     CTX = 64
     LAYERS = 3
     HEADS = 6
-    D_MODEL = 300     # FastText dim
+    D_MODEL = 300 
     D_FF = 4 * D_MODEL
     LR = 3e-4
     BATCH = 16
