@@ -207,13 +207,16 @@ def train_with_grad_accum(model,dataloader,optimizer,accum_steps,device):
     model.train()
     total_loss = 0
     optimizer.zero_grad()
+    scaler = torch.amp.GradScaler('cuda')  # For mixed precision training
     for step, (input_ids, labels) in enumerate(dataloader):
         input_ids, labels = input_ids.to(device), labels.to(device)
-        logits, _ = model(input_ids)
-        loss = lm_loss(logits,labels) / accum_steps
-        loss.backward()
+        with torch.amp.autocast('cuda'):
+            logits, _ = model(input_ids)
+            loss = lm_loss(logits,labels) / accum_steps
+        scaler.scale(loss).backward()
         if (step + 1) % accum_steps == 0:
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             optimizer.zero_grad()
         total_loss += loss.item() * input_ids.size(0) * accum_steps
     return total_loss / len(dataloader.dataset)
