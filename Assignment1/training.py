@@ -91,7 +91,7 @@ class Decoder(nn.Module):
             x = layer(x,mask)
         x = self.ln(x)
         logits = self.output_proj(x)
-        return F.softmax(logits,dim=-1)
+        return logits
     
 class SinusoidalPositionalEncoding(nn.Module):
     def __init__(self,d_model,max_len=5000):
@@ -106,3 +106,32 @@ class SinusoidalPositionalEncoding(nn.Module):
     def forward(self,x):
         B,L, _ = x.shape
         return x + self.pe[:L].unsqueeze(0)
+    
+def lm_loss(logits,labels):
+    return F.cross_entropy(logits.view(-1,logits.size(-1)),labels.view(-1),ignore_index=-100)
+
+def train_with_grad_accum(model,dataloader,optimizer,accum_steps,device):
+    model.train()
+    total_loss = 0
+    optimizer.zero_grad()
+    for step, (input_ids, labels) in enumerate(dataloader):
+        input_ids, labels = input_ids.to(device), labels.to(device)
+        logits = model(input_ids)
+        loss = lm_loss(logits,labels)
+        loss.backward()
+        if (step + 1) % accum_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+        total_loss += loss.item() * input_ids.size(0) * accum_steps
+    return total_loss / len(dataloader.dataset)
+
+@torch.no_grad()
+def evaluate(model,dataloader,device):
+    model.eval()
+    total_loss = 0
+    for input_ids, labels in dataloader:
+        input_ids, labels = input_ids.to(device), labels.to(device)
+        logits = model(input_ids)
+        loss = lm_loss(logits,labels)
+        total_loss += loss.item() * input_ids.size(0)
+    return total_loss / len(dataloader.dataset) 
