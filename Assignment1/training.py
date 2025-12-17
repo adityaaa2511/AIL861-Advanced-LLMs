@@ -113,8 +113,8 @@ class MultiHeadAttention(nn.Module):
         v = self._split_heads(v)
 
         if kv_cache is not None:
-            k = torch.cat([kv_cache[0],k],dim=2)
-            v = torch.cat([kv_cache[1],v],dim=2)
+            k = torch.cat([kv_cache['k'],k],dim=2)
+            v = torch.cat([kv_cache['v'],v],dim=2)
 
         new_cache = {"k": k.detach(), "v": v.detach()}
 
@@ -161,16 +161,21 @@ class Decoder(nn.Module):
         self.layers = nn.ModuleList([TransformerBlock(d_model,d_ff,num_heads,dropout) for _ in range(num_layers)])
         self.ln = nn.LayerNorm(d_model)
         self.output_proj = nn.Linear(d_model,vocab_size, bias=False)
+        self.output_proj.weight = self.embedding.weight
 
-    def _casual_mask(self,L,device):
+    def _causal_mask(self,L,device):
         mask = torch.triu(torch.ones(L,L,device=device),diagonal=1)
         mask = mask.masked_fill(mask==1,float('-inf'))
-        return mask
+        return mask.unsqueeze(0).unsqueeze(0)
 
     def forward(self,x,kv_cache=None,mask=None):
         B,L = x.shape
-        if mask is None:
-            mask = self._casual_mask(L,DEVICE)
+        if kv_cache is None:
+            mask = self._causal_mask(L, x.device)
+        else:
+            Lq = x.size(1)
+            Lk = kv_cache[0]["k"].size(2) + Lq
+            mask = torch.zeros(1, 1, Lq, Lk, device=x.device)
         x = self.pe(self.embedding(x))
         new_caches = []
         for i, layer in enumerate(self.layers):
@@ -204,7 +209,7 @@ def train_with_grad_accum(model,dataloader,optimizer,accum_steps,device):
     for step, (input_ids, labels) in enumerate(dataloader):
         input_ids, labels = input_ids.to(device), labels.to(device)
         logits, _ = model(input_ids)
-        loss = lm_loss(logits,labels)
+        loss = lm_loss(logits,labels) / accum_steps
         loss.backward()
         if (step + 1) % accum_steps == 0:
             optimizer.step()
@@ -233,7 +238,7 @@ def perplexity(loss):
 def generate(model, prompt_ids, max_new=50, temp=1.0, topk=20):
     model.eval()
     x = torch.tensor(prompt_ids, device=DEVICE).unsqueeze(0)
-    cache = [None] * len(model.blocks)
+    cache = [None] * len(model.layers)
     for _ in range(max_new):
         logits, cache = model(x, cache)
         logits = logits[:, -1, :] / temp
