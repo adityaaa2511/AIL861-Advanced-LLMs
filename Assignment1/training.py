@@ -235,15 +235,12 @@ def evaluate(model,dataloader,device):
 def perplexity(loss):
     return math.exp(loss)
 
-# ============================================================
-# 11) Generation (Stochastic)
-# ============================================================
 @torch.no_grad()
 def generate(model, prompt_ids, max_new=50, temp=1.0, topk=20):
     model.eval()
     x = torch.tensor(prompt_ids, device=DEVICE).unsqueeze(0)
     current_input = x
-    cache = [None] * len(model.layers)
+    cache = [None]
     for _ in range(max_new):
         logits, cache = model(current_input, cache)
         logits = logits[:, -1, :] / temp
@@ -270,15 +267,12 @@ def main():
     BATCH = 16
     ACCUM = 1
 
-    # ---- Load data ----
     ds = load_dataset("roneneldan/TinyStories")
     vocab, id2word = build_vocab(ds["train"])
 
-    # ---- FastText ----
     FT_PATH = "cc.en.300.vec"
     emb = load_fasttext(FT_PATH, vocab, D_MODEL)
 
-    # ---- DataLoaders ----
     train_ds = TinyStoriesDataset(ds["train"], vocab, CTX)
     val_ds   = TinyStoriesDataset(ds["validation"], vocab, CTX)
     train_dl = torch.utils.data.DataLoader(train_ds, batch_size=BATCH, shuffle=True)
@@ -298,7 +292,6 @@ def main():
         va_ppls.append(perplexity(vl))
         print(f"Epoch {ep}: train {tl:.4f} |  tr_ppl {tr_ppls[-1]:.2f} | val {vl:.4f} |  val_ppl {va_ppls[-1]:.2f}")
 
-    # ---- Plots: loss + perplexity ----
     plt.figure()
     plt.plot(tr_losses, label="train loss")
     plt.plot(va_losses, label="val loss")
