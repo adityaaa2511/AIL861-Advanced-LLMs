@@ -240,7 +240,7 @@ def generate(model, prompt_ids, max_new=50, temp=1.0, topk=20):
     model.eval()
     x = torch.tensor(prompt_ids, device=DEVICE).unsqueeze(0)
     current_input = x
-    cache = [None]
+    cache = None
     for _ in range(max_new):
         logits, cache = model(current_input, cache)
         logits = logits[:, -1, :] / temp
