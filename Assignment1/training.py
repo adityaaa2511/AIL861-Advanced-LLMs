@@ -312,6 +312,10 @@ def main():
 
     # ---- Sample generation ----
     ex = val_ds[0][0][:5].tolist()
+    prompt_words = [id2word[i] for i in ex]
+    print("Prompt text:", " ".join(prompt_words))
+    # text = "spot saw the sun"
+    # prompt_ids = encode(text, vocab, CTX)
     out = generate(model, ex)
     print("Generated:", " ".join(id2word[i] for i in out if i in id2word))
 
