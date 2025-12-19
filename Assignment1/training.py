@@ -236,7 +236,7 @@ def perplexity(loss):
     return math.exp(loss)
 
 @torch.no_grad()
-def generate(model, prompt_ids, max_new=50, temp=1.0, topk=20):
+def generate(model, prompt_ids, max_new=150, temp=1.0, topk=20):
     model.eval()
     x = torch.tensor(prompt_ids, device=DEVICE).unsqueeze(0)
     current_input = x
@@ -255,6 +255,13 @@ def generate(model, prompt_ids, max_new=50, temp=1.0, topk=20):
         if nxt.item() == SPECIAL["<eos>"]:
             break
     return x.squeeze(0).tolist()
+
+def encode_prompt(text, vocab):
+    """Prompt encoding: no <eos>, no padding."""
+    ids = [vocab["<sos>"]]
+    for w in tokenize(text):
+        ids.append(vocab.get(w, vocab["<unk>"]))
+    return ids
 
 def main():
     
@@ -314,10 +321,19 @@ def main():
     ex = val_ds[0][0][:5].tolist()
     prompt_words = [id2word[i] for i in ex]
     print("Prompt text:", " ".join(prompt_words))
-    # text = "spot saw the sun"
-    # prompt_ids = encode(text, vocab, CTX)
     out = generate(model, ex)
     print("Generated:", " ".join(id2word[i] for i in out if i in id2word))
+
+    model2 = Decoder(emb,len(vocab),D_MODEL,D_FF,HEADS,LAYERS).to(DEVICE)
+    model2.load_state_dict(torch.load("decoder_tinystories.pt", map_location=DEVICE))
+
+    # prompt = "Once upon a time"
+    # ex = encode_prompt(prompt, vocab)
+    # print(ex)
+    # print("Prompt text:", prompt)
+    # out2 = generate(model2, ex)
+    # print("Generated from loaded model:", " ".join(id2word[i] for i in out2 if i in id2word))
+
 
 if __name__ == "__main__":
     main()
