@@ -256,13 +256,6 @@ def generate(model, prompt_ids, max_new=150, temp=1.0, topk=20):
             break
     return x.squeeze(0).tolist()
 
-def encode_prompt(text, vocab):
-    """Prompt encoding: no <eos>, no padding."""
-    ids = [vocab["<sos>"]]
-    for w in tokenize(text):
-        ids.append(vocab.get(w, vocab["<unk>"]))
-    return ids
-
 def main():
     
     CTX = 64
@@ -324,16 +317,15 @@ def main():
     out = generate(model, ex)
     print("Generated:", " ".join(id2word[i] for i in out if i in id2word))
 
-    model2 = Decoder(emb,len(vocab),D_MODEL,D_FF,HEADS,LAYERS).to(DEVICE)
-    model2.load_state_dict(torch.load("decoder_tinystories.pt", map_location=DEVICE))
+    # model2 = Decoder(emb,len(vocab),D_MODEL,D_FF,HEADS,LAYERS).to(DEVICE)
+    # model2.load_state_dict(torch.load("decoder_tinystories.pt", map_location=DEVICE))
 
-    # prompt = "Once upon a time"
-    # ex = encode_prompt(prompt, vocab)
+    # prompt = "there was a dumb boy named tom. he lived in a small village."
+    # ex = encode(prompt, vocab, CTX)[:9] # Limit prompt length to avoid <pad> tokens in generation
     # print(ex)
     # print("Prompt text:", prompt)
     # out2 = generate(model2, ex)
     # print("Generated from loaded model:", " ".join(id2word[i] for i in out2 if i in id2word))
-
 
 if __name__ == "__main__":
     main()
