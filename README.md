@@ -118,7 +118,8 @@ Prints:
 - Full model saved via:
 ```python
 torch.save(model.state_dict(), "decoder_tinystories.pt")
+```
 
-### Sample Prompt + Generation
+## Sample Prompt + Generation
 - Prompt: <sos> spot spot saw the
 - Generated: <sos> spot spot saw the sun rise in the sky he wanted to go outside and play he ran to his mom and said mom can i go outside and play his mom smiled and said yes spot you can go outside but be careful don t go too far and don t get too close to the sun spot ran outside and saw <eos>
