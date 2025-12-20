@@ -236,25 +236,52 @@ def perplexity(loss):
     return math.exp(loss)
 
 @torch.no_grad()
-def generate(model, prompt_ids, max_new=150, temp=1.0, topk=20):
+def generate(model, prompt_ids, max_new=150, temp=1.0, topk=20, beam_size=4):
     model.eval()
     x = torch.tensor(prompt_ids, device=DEVICE).unsqueeze(0)
-    current_input = x
-    cache = None
+
+    # If beam size is 1, use top-k greedy sampling
+    if beam_size == 1:
+        current_input = x
+        cache = None
+        for _ in range(max_new):
+            logits, cache = model(current_input, cache)
+            logits = logits[:, -1, :] / temp
+            probs = F.softmax(logits, dim=-1)
+            if topk is not None:
+                v, ix = torch.topk(probs, topk)
+                probs2 = torch.zeros_like(probs).scatter_(1, ix, v)
+                probs = probs2 / probs2.sum()
+            nxt = torch.multinomial(probs, 1)
+            x = torch.cat([x, nxt], dim=1)
+            current_input = nxt
+            if nxt.item() == SPECIAL["<eos>"]:
+                break
+        return x.squeeze(0).tolist()
+    
+    # Beam entries are: (sequence Tensor, logprob, cache)
+    # logprob stores sum of log probabilities along the sequence
+    beams = [(x, 0.0, None)]
     for _ in range(max_new):
-        logits, cache = model(current_input, cache)
-        logits = logits[:, -1, :] / temp
-        probs = F.softmax(logits, dim=-1)
-        if topk is not None:
-            v, ix = torch.topk(probs, topk)
-            probs2 = torch.zeros_like(probs).scatter_(1, ix, v)
-            probs = probs2 / probs2.sum()
-        nxt = torch.multinomial(probs, 1)
-        x = torch.cat([x, nxt], dim=1)
-        current_input = nxt
-        if nxt.item() == SPECIAL["<eos>"]:
-            break
-    return x.squeeze(0).tolist()
+        new_beams = []
+        for seq, logp, cache in beams:
+            current_input = seq[:, -1].unsqueeze(1) if seq.size(1) > x.size(1) else seq
+            logits, new_cache = model(current_input, cache)
+            logits = logits[:, -1, :] / temp
+            probs = F.log_softmax(logits, dim=-1) 
+            topv, topi = torch.topk(probs, beam_size, dim=-1)
+            for i in range(beam_size):
+                token = topi[0, i].view(1, 1)
+                token_lp = topv[0, i].item()
+                new_seq = torch.cat([seq, token], dim=1)
+                new_logp = logp + token_lp
+                if token.item() == SPECIAL["<eos>"]:
+                    return new_seq.squeeze(0).tolist()
+                new_beams.append((new_seq, new_logp, new_cache))
+        new_beams.sort(key=lambda x: x[1], reverse=True)
+        beams = new_beams[:beam_size]
+    best_seq = max(beams, key=lambda x: x[1])[0]
+    return best_seq.squeeze(0).tolist()
 
 def main():
     
@@ -320,8 +347,8 @@ def main():
     # model2 = Decoder(emb,len(vocab),D_MODEL,D_FF,HEADS,LAYERS).to(DEVICE)
     # model2.load_state_dict(torch.load("decoder_tinystories.pt", map_location=DEVICE))
 
-    # prompt = "there was a dumb boy named tom. he lived in a small village."
-    # ex = encode(prompt, vocab, CTX)[:9] # Limit prompt length to avoid <pad> tokens in generation
+    # prompt = "There was a dumb boy named Tom. He lived in a small village."
+    # ex = encode(prompt, vocab, CTX)[:14] # Limit prompt length to avoid <pad> tokens in generation
     # print(ex)
     # print("Prompt text:", prompt)
     # out2 = generate(model2, ex)
