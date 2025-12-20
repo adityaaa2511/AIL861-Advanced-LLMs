@@ -319,6 +319,8 @@ def main():
         va_ppls.append(perplexity(vl))
         print(f"Epoch {ep}: train {tl:.4f} |  tr_ppl {tr_ppls[-1]:.2f} | val {vl:.4f} |  val_ppl {va_ppls[-1]:.2f}")
 
+    torch.save(model.state_dict(), "decoder_tinystories.pt")
+
     plt.figure()
     plt.plot(tr_losses, label="train loss")
     plt.plot(va_losses, label="val loss")
